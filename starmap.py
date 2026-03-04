@@ -22,24 +22,24 @@ PLANET_GLYPHS = {
 }
 
 PLANET_COLORS = {
-    "sun": "#f0e4a8", "moon": "#d4d0c8", "mercury": "#c8c0b0",
-    "venus": "#e8b888", "mars": "#e09090", "jupiter": "#dcc080",
-    "saturn": "#c0a870", "uranus": "#88c0d8", "neptune": "#7888c0",
-    "pluto": "#a08070"
+    "sun": "#b8960a", "moon": "#6b6560", "mercury": "#7a7060",
+    "venus": "#b07030", "mars": "#b04040", "jupiter": "#a08820",
+    "saturn": "#786838", "uranus": "#2878a0", "neptune": "#3848a0",
+    "pluto": "#704838"
 }
 
-RING_STROKE = "#4a4438"
-WEDGE_FILL_1 = (30/255, 28/255, 24/255, 0.35)
-WEDGE_FILL_2 = (26/255, 24/255, 22/255, 0.35)
-SIGN_COLOR = "#908878"
-GLYPH_COLOR = "#f0e4a8"
-TICK_COLOR = "#3a3630"
+BG_FILL = "#e8e4de"
+RING_STROKE = "#5a5448"
+WEDGE_FILL_1 = "#ded8d0"
+WEDGE_FILL_2 = "#d8d2ca"
+SIGN_COLOR = "#4a4438"
+TICK_COLOR = "#8a8478"
 ASPECT_COLORS = {
-    "conjunction": "#80b8b8",
-    "sextile": "#98b0d0",
-    "square": "#d09090",
-    "trine": "#90c8a0",
-    "opposition": "#e0c888"
+    "conjunction": "#3a8888",
+    "sextile": "#4868a0",
+    "square": "#b04848",
+    "trine": "#388858",
+    "opposition": "#a08020"
 }
 
 OUTER_R = 4.2
@@ -97,12 +97,16 @@ def generate_starmap(planets, date):
     ax.set_aspect("equal")
     ax.axis("off")
 
+    bg_circle = Circle((0, 0), OUTER_R + 0.08, facecolor=BG_FILL,
+                        edgecolor="none", zorder=0)
+    ax.add_patch(bg_circle)
+
     outer_circle = Circle((0, 0), OUTER_R, fill=False,
-                           edgecolor=RING_STROKE, linewidth=2.0, alpha=0.9)
+                           edgecolor=RING_STROKE, linewidth=2.5, zorder=1)
     inner_sign_circle = Circle((0, 0), SIGN_R_INNER, fill=False,
-                                edgecolor=RING_STROKE, linewidth=1.5, alpha=0.7)
+                                edgecolor=RING_STROKE, linewidth=2.0, zorder=1)
     inner_circle = Circle((0, 0), INNER_R, fill=False,
-                           edgecolor=RING_STROKE, linewidth=1.0, alpha=0.5)
+                           edgecolor=RING_STROKE, linewidth=1.5, alpha=0.7, zorder=1)
     ax.add_patch(outer_circle)
     ax.add_patch(inner_sign_circle)
     ax.add_patch(inner_circle)
@@ -112,14 +116,14 @@ def generate_starmap(planets, date):
         wedge_color = WEDGE_FILL_1 if i % 2 == 0 else WEDGE_FILL_2
         wedge = Wedge((0, 0), SIGN_R_OUTER, start_angle - 30, start_angle,
                        width=SIGN_R_OUTER - SIGN_R_INNER,
-                       facecolor=wedge_color, edgecolor="none")
+                       facecolor=wedge_color, edgecolor="none", zorder=1)
         ax.add_patch(wedge)
 
     for i in range(12):
         angle = lon_to_angle(i * 30)
         x1, y1 = angle_xy(angle, SIGN_R_INNER)
         x2, y2 = angle_xy(angle, OUTER_R)
-        ax.plot([x1, x2], [y1, y2], color=RING_STROKE, linewidth=1.0, alpha=0.6)
+        ax.plot([x1, x2], [y1, y2], color=RING_STROKE, linewidth=1.2, alpha=0.7, zorder=2)
 
     for i in range(360):
         angle = lon_to_angle(i)
@@ -127,16 +131,16 @@ def generate_starmap(planets, date):
             continue
         if i % 10 == 0:
             r1, r2 = SIGN_R_OUTER, OUTER_R
-            lw = 0.6
+            lw = 0.8
         elif i % 5 == 0:
             r1 = SIGN_R_OUTER + (OUTER_R - SIGN_R_OUTER) * 0.5
             r2 = OUTER_R
-            lw = 0.4
+            lw = 0.5
         else:
             continue
         x1, y1 = angle_xy(angle, r1)
         x2, y2 = angle_xy(angle, r2)
-        ax.plot([x1, x2], [y1, y2], color=TICK_COLOR, linewidth=lw, alpha=0.4)
+        ax.plot([x1, x2], [y1, y2], color=TICK_COLOR, linewidth=lw, alpha=0.5, zorder=2)
 
     for i, sign in enumerate(SIGN_ORDER):
         mid_lon = i * 30 + 15
@@ -144,7 +148,7 @@ def generate_starmap(planets, date):
         r_pos = (SIGN_R_INNER + SIGN_R_OUTER) / 2
         x, y = angle_xy(angle, r_pos)
         ax.text(x, y, SIGN_GLYPHS[sign], ha="center", va="center",
-                fontsize=20, color=SIGN_COLOR, fontweight="normal", alpha=0.85)
+                fontsize=22, color=SIGN_COLOR, fontweight="bold", zorder=3)
 
     planet_positions = {}
     for name, data in planets.items():
@@ -167,24 +171,23 @@ def generate_starmap(planets, date):
     for name, (angle, r, lon) in placed.items():
         data = planets[name]
         glyph = PLANET_GLYPHS.get(name, name[0].upper())
-        color = PLANET_COLORS.get(name, GLYPH_COLOR)
+        color = PLANET_COLORS.get(name, "#4a4438")
         x, y = angle_xy(angle, r)
 
-        ax.plot(x, y, "o", color=color, markersize=6, alpha=0.6, zorder=3)
+        ax.plot(x, y, "o", color=color, markersize=7, alpha=0.8, zorder=4)
 
         ax.text(x, y + 0.28, glyph, ha="center", va="center",
-                fontsize=28, color=color, fontweight="bold", alpha=0.2, zorder=4)
-        ax.text(x, y + 0.28, glyph, ha="center", va="center",
-                fontsize=24, color=color, fontweight="bold", alpha=0.95, zorder=5)
+                fontsize=26, color=color, fontweight="bold", zorder=5)
 
         tick_angle = lon_to_angle(lon)
         tx1, ty1 = angle_xy(tick_angle, SIGN_R_INNER)
-        tx2, ty2 = angle_xy(tick_angle, SIGN_R_INNER - 0.15)
-        ax.plot([tx1, tx2], [ty1, ty2], color=color, linewidth=1.2, alpha=0.5)
+        tx2, ty2 = angle_xy(tick_angle, SIGN_R_INNER - 0.18)
+        ax.plot([tx1, tx2], [ty1, ty2], color=color, linewidth=1.5, alpha=0.7, zorder=2)
 
         if data.get("retrograde", False):
-            ax.text(x, y - 0.22, "Rx", ha="center", va="center",
-                    fontsize=9, color="#e09090", fontstyle="italic", alpha=0.85, zorder=5)
+            ax.text(x, y - 0.25, "Rx", ha="center", va="center",
+                    fontsize=10, color="#b04040", fontweight="bold",
+                    fontstyle="italic", zorder=5)
 
     aspects = calculate_aspects(planets)
     for p1_name, p2_name, aspect_type, orb in aspects:
@@ -195,19 +198,19 @@ def generate_starmap(planets, date):
             x2, y2 = angle_xy(a2, min(r2, INNER_R))
 
             color = ASPECT_COLORS.get(aspect_type, RING_STROKE)
-            alpha = max(0.2, 0.55 - orb * 0.06)
-            linewidth = 1.5 if aspect_type in ("conjunction", "opposition") else 1.0
+            alpha = max(0.35, 0.7 - orb * 0.06)
+            linewidth = 2.0 if aspect_type in ("conjunction", "opposition") else 1.4
             linestyle = (0, (5, 5)) if aspect_type == "sextile" else "-"
 
             ax.plot([x1, x2], [y1, y2], color=color, linewidth=linewidth,
                     alpha=alpha, linestyle=linestyle, zorder=2)
 
-    ax.text(0, -4.8, date, ha="center", va="center", fontsize=10,
-            color=SIGN_COLOR, fontfamily="monospace", alpha=0.5)
+    ax.text(0, -4.75, date, ha="center", va="center", fontsize=10,
+            color=SIGN_COLOR, fontfamily="monospace", alpha=0.6, zorder=3)
 
-    ax.text(0, 4.8, "D A I L Y   P L A N E T A R Y   O R A C L E",
+    ax.text(0, 4.75, "D A I L Y   P L A N E T A R Y   O R A C L E",
             ha="center", va="center", fontsize=7, color=SIGN_COLOR,
-            fontfamily="monospace", alpha=0.3)
+            fontfamily="monospace", alpha=0.4, zorder=3)
 
     plt.tight_layout(pad=0)
 
