@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import urllib3
 from starmap import generate_starmap
@@ -60,12 +61,45 @@ def extract_planets(data):
 
 def upload_image(file_path):
 
-    # Construct a public URL pointing to the file in Replit
     filename = os.path.basename(file_path)
+    file_size = os.path.getsize(file_path)
 
-    image_url = f"https://cosmic-vibes.replit.app/{filename}"
+    upload_url_endpoint = "https://www.wixapis.com/site-media/v1/files/generate-upload-url"
+    payload = {
+        "mimeType": "image/png",
+        "fileName": filename
+    }
 
-    return image_url
+    r1 = requests.post(upload_url_endpoint, headers=HEADERS, json=payload)
+    if r1.status_code != 200:
+        print("Wix upload URL error:", r1.text)
+        r1.raise_for_status()
+
+    result = r1.json()
+    upload_url = result["uploadUrl"]
+
+    with open(file_path, "rb") as f:
+        file_data = f.read()
+
+    r2 = requests.put(upload_url, data=file_data, headers={"Content-Type": "image/png"})
+    if r2.status_code not in (200, 201, 204):
+        print("Wix file upload error:", r2.text)
+        r2.raise_for_status()
+
+    upload_result = r2.json()
+    file_info = upload_result.get("file", {})
+    file_id = file_info.get("id", "")
+    file_display_name = file_info.get("displayName", filename)
+
+    if not file_id:
+        print("Upload response:", json.dumps(upload_result, indent=2))
+        raise Exception("No file ID returned from Wix upload")
+
+    wix_image_url = f"wix:image://v1/{file_id}/{file_display_name}#originWidth=1200&originHeight=300"
+
+    print(f"  Uploaded to Wix Media: {wix_image_url}")
+
+    return wix_image_url
 
 
 # ------------------------------------------------
@@ -110,18 +144,25 @@ def get_item_id(slug):
 
 def update_oracle_image(item_id, image_url):
 
-    url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}?dataCollectionId={COLLECTION_ID}"
+    get_url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}?dataCollectionId={COLLECTION_ID}"
+    r = requests.get(get_url, headers=HEADERS)
+    if r.status_code != 200:
+        print("Wix fetch error:", r.text)
+        r.raise_for_status()
 
+    item = r.json()["dataItem"]
+    item["data"]["starMapImage"] = image_url
+
+    put_url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}"
     payload = {
-        "dataItem": {
-            "id": item_id,
-            "data": {
-                "starMapImage": image_url
-            }
-        }
+        "dataCollectionId": COLLECTION_ID,
+        "dataItem": item
     }
 
-    response = requests.patch(url, headers=HEADERS, json=payload)
+    response = requests.put(put_url, headers=HEADERS, json=payload)
+
+    if response.status_code != 200:
+        print("Wix update error:", response.text)
 
     response.raise_for_status()
 
