@@ -80,9 +80,9 @@ def calculate_aspects(planets):
 
 
 def generate_starmap(planets, date):
-    fig = plt.figure(figsize=(10, 10), facecolor=BG_COLOR)
+    fig = plt.figure(figsize=(10, 10), facecolor="none")
     ax = fig.add_subplot(111, polar=True)
-    ax.set_facecolor(BG_COLOR)
+    ax.set_facecolor("none")
 
     ax.set_ylim(0, 1.15)
     ax.set_yticks([])
@@ -195,7 +195,7 @@ def generate_starmap(planets, date):
     plt.tight_layout(pad=0.5)
 
     filename = f"starmap_{date}.png"
-    fig.savefig(filename, facecolor=BG_COLOR, dpi=200,
+    fig.savefig(filename, transparent=True, dpi=200,
                 bbox_inches="tight", pad_inches=0.3)
     plt.close(fig)
 
