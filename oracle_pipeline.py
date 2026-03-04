@@ -110,7 +110,7 @@ def get_item_id(slug):
 
 def update_oracle_image(item_id, image_url):
 
-    url = "https://www.wixapis.com/wix-data/v2/items/update"
+    url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}"
 
     payload = {
         "dataCollectionId": COLLECTION_ID,
@@ -122,7 +122,7 @@ def update_oracle_image(item_id, image_url):
         }
     }
 
-    response = requests.put(url, headers=HEADERS, json=payload)
+    response = requests.patch(url, headers=HEADERS, json=payload)
 
     response.raise_for_status()
 
