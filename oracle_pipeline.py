@@ -110,12 +110,11 @@ def get_item_id(slug):
 
 def update_oracle_image(item_id, image_url):
 
-    url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}"
+    url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}?dataCollectionId={COLLECTION_ID}"
 
     payload = {
-        "dataCollectionId": COLLECTION_ID,
         "dataItem": {
-            "_id": item_id,
+            "id": item_id,
             "data": {
                 "starMapImage": image_url
             }
