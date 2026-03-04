@@ -1,9 +1,8 @@
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
-from matplotlib.font_manager import FontProperties
+from matplotlib.patches import Circle, Wedge
 
 SIGN_ORDER = [
     "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio",
@@ -23,25 +22,31 @@ PLANET_GLYPHS = {
 }
 
 PLANET_COLORS = {
-    "sun": "#e7d9a6", "moon": "#c0bfb8", "mercury": "#b5b0a3",
-    "venus": "#d4a87a", "mars": "#c88484", "jupiter": "#cdb278",
-    "saturn": "#a89868", "uranus": "#7ba8b8", "neptune": "#6878a8",
-    "pluto": "#8a7060"
+    "sun": "#f0e4a8", "moon": "#d4d0c8", "mercury": "#c8c0b0",
+    "venus": "#e8b888", "mars": "#e09090", "jupiter": "#dcc080",
+    "saturn": "#c0a870", "uranus": "#88c0d8", "neptune": "#7888c0",
+    "pluto": "#a08070"
 }
 
-BG_COLOR = "#141210"
-RING_COLOR_1 = "#1e1c18"
-RING_COLOR_2 = "#1a1816"
-BORDER_COLOR = "#3a3630"
-LABEL_COLOR = "#6e6861"
-GLYPH_COLOR = "#e7d9a6"
+RING_STROKE = "#4a4438"
+WEDGE_FILL_1 = (30/255, 28/255, 24/255, 0.35)
+WEDGE_FILL_2 = (26/255, 24/255, 22/255, 0.35)
+SIGN_COLOR = "#908878"
+GLYPH_COLOR = "#f0e4a8"
+TICK_COLOR = "#3a3630"
 ASPECT_COLORS = {
-    "conjunction": "#6f9c9c",
-    "sextile": "#8a9cb8",
-    "square": "#a87373",
-    "trine": "#7ba88c",
-    "opposition": "#cdb278"
+    "conjunction": "#80b8b8",
+    "sextile": "#98b0d0",
+    "square": "#d09090",
+    "trine": "#90c8a0",
+    "opposition": "#e0c888"
 }
+
+OUTER_R = 4.2
+SIGN_R_OUTER = 3.9
+SIGN_R_INNER = 3.2
+PLANET_R = 2.6
+INNER_R = 2.1
 
 
 def ecliptic_longitude(sign, degree):
@@ -49,8 +54,13 @@ def ecliptic_longitude(sign, degree):
     return index * 30 + degree
 
 
-def deg_to_rad(deg):
-    return np.radians(90 - deg)
+def lon_to_angle(lon):
+    return 90 - lon
+
+
+def angle_xy(angle_deg, radius, cx=0, cy=0):
+    rad = np.radians(angle_deg)
+    return cx + radius * np.cos(rad), cy + radius * np.sin(rad)
 
 
 def calculate_aspects(planets):
@@ -80,60 +90,61 @@ def calculate_aspects(planets):
 
 
 def generate_starmap(planets, date):
-    fig = plt.figure(figsize=(10, 10), facecolor="none")
-    ax = fig.add_subplot(111, polar=True)
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12), facecolor="none")
     ax.set_facecolor("none")
+    ax.set_xlim(-5.2, 5.2)
+    ax.set_ylim(-5.2, 5.2)
+    ax.set_aspect("equal")
+    ax.axis("off")
 
-    ax.set_ylim(0, 1.15)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ax.spines["polar"].set_visible(False)
-    ax.grid(False)
-
-    outer_r = 1.0
-    sign_r_outer = 0.95
-    sign_r_inner = 0.78
-    planet_r = 0.65
-    inner_r = 0.55
-    aspect_r = 0.50
-
-    theta_ring = np.linspace(0, 2 * np.pi, 360)
-    ax.plot(theta_ring, [outer_r] * 360, color=BORDER_COLOR, linewidth=1.5, alpha=0.8)
-    ax.plot(theta_ring, [sign_r_inner] * 360, color=BORDER_COLOR, linewidth=1.0, alpha=0.6)
-    ax.plot(theta_ring, [inner_r] * 360, color=BORDER_COLOR, linewidth=0.5, alpha=0.4)
+    outer_circle = Circle((0, 0), OUTER_R, fill=False,
+                           edgecolor=RING_STROKE, linewidth=2.0, alpha=0.9)
+    inner_sign_circle = Circle((0, 0), SIGN_R_INNER, fill=False,
+                                edgecolor=RING_STROKE, linewidth=1.5, alpha=0.7)
+    inner_circle = Circle((0, 0), INNER_R, fill=False,
+                           edgecolor=RING_STROKE, linewidth=1.0, alpha=0.5)
+    ax.add_patch(outer_circle)
+    ax.add_patch(inner_sign_circle)
+    ax.add_patch(inner_circle)
 
     for i in range(12):
-        start_deg = i * 30
-        end_deg = (i + 1) * 30
-        theta_start = deg_to_rad(start_deg)
-        theta_end = deg_to_rad(end_deg)
-
-        thetas = np.linspace(theta_start, theta_end, 30)
-        if theta_start > theta_end:
-            thetas = np.linspace(theta_start, theta_end + 2 * np.pi, 30) % (2 * np.pi)
-            if theta_end < 0:
-                thetas = np.linspace(theta_start, theta_end, 30)
-
-        fill_color = RING_COLOR_1 if i % 2 == 0 else RING_COLOR_2
-        for k in range(len(thetas) - 1):
-            ax.fill_between(
-                [thetas[k], thetas[k + 1]],
-                sign_r_inner, sign_r_outer,
-                color=fill_color, alpha=0.6
-            )
+        start_angle = lon_to_angle(i * 30)
+        wedge_color = WEDGE_FILL_1 if i % 2 == 0 else WEDGE_FILL_2
+        wedge = Wedge((0, 0), SIGN_R_OUTER, start_angle - 30, start_angle,
+                       width=SIGN_R_OUTER - SIGN_R_INNER,
+                       facecolor=wedge_color, edgecolor="none")
+        ax.add_patch(wedge)
 
     for i in range(12):
-        angle = deg_to_rad(i * 30)
-        ax.plot([angle, angle], [sign_r_inner, outer_r],
-                color=BORDER_COLOR, linewidth=0.8, alpha=0.5)
+        angle = lon_to_angle(i * 30)
+        x1, y1 = angle_xy(angle, SIGN_R_INNER)
+        x2, y2 = angle_xy(angle, OUTER_R)
+        ax.plot([x1, x2], [y1, y2], color=RING_STROKE, linewidth=1.0, alpha=0.6)
+
+    for i in range(360):
+        angle = lon_to_angle(i)
+        if i % 30 == 0:
+            continue
+        if i % 10 == 0:
+            r1, r2 = SIGN_R_OUTER, OUTER_R
+            lw = 0.6
+        elif i % 5 == 0:
+            r1 = SIGN_R_OUTER + (OUTER_R - SIGN_R_OUTER) * 0.5
+            r2 = OUTER_R
+            lw = 0.4
+        else:
+            continue
+        x1, y1 = angle_xy(angle, r1)
+        x2, y2 = angle_xy(angle, r2)
+        ax.plot([x1, x2], [y1, y2], color=TICK_COLOR, linewidth=lw, alpha=0.4)
 
     for i, sign in enumerate(SIGN_ORDER):
-        mid_deg = i * 30 + 15
-        angle = deg_to_rad(mid_deg)
-        glyph = SIGN_GLYPHS[sign]
-        r_pos = (sign_r_inner + sign_r_outer) / 2
-        ax.text(angle, r_pos, glyph, ha="center", va="center",
-                fontsize=14, color=LABEL_COLOR, fontweight="normal")
+        mid_lon = i * 30 + 15
+        angle = lon_to_angle(mid_lon)
+        r_pos = (SIGN_R_INNER + SIGN_R_OUTER) / 2
+        x, y = angle_xy(angle, r_pos)
+        ax.text(x, y, SIGN_GLYPHS[sign], ha="center", va="center",
+                fontsize=20, color=SIGN_COLOR, fontweight="normal", alpha=0.85)
 
     planet_positions = {}
     for name, data in planets.items():
@@ -143,60 +154,66 @@ def generate_starmap(planets, date):
     placed = {}
     sorted_planets = sorted(planet_positions.items(), key=lambda x: x[1])
     for name, lon in sorted_planets:
-        angle = deg_to_rad(lon)
-        r = planet_r
-        for other_name, (other_angle, other_r) in placed.items():
-            angular_diff = abs(angle - other_angle)
-            if angular_diff > np.pi:
-                angular_diff = 2 * np.pi - angular_diff
-            if angular_diff < 0.15 and abs(r - other_r) < 0.08:
-                r = other_r - 0.07
-        placed[name] = (angle, r)
+        angle = lon_to_angle(lon)
+        r = PLANET_R
+        for other_name, (other_angle, other_r, _) in placed.items():
+            ang_diff = abs(angle - other_angle) % 360
+            if ang_diff > 180:
+                ang_diff = 360 - ang_diff
+            if ang_diff < 8 and abs(r - other_r) < 0.35:
+                r = other_r - 0.32
+        placed[name] = (angle, r, lon)
 
-    for name, (angle, r) in placed.items():
+    for name, (angle, r, lon) in placed.items():
         data = planets[name]
         glyph = PLANET_GLYPHS.get(name, name[0].upper())
         color = PLANET_COLORS.get(name, GLYPH_COLOR)
+        x, y = angle_xy(angle, r)
 
-        ax.plot(angle, r, "o", color=color, markersize=5, alpha=0.7)
-        ax.text(angle, r + 0.06, glyph, ha="center", va="center",
-                fontsize=18, color=color, fontweight="bold")
+        ax.plot(x, y, "o", color=color, markersize=6, alpha=0.6, zorder=3)
+
+        ax.text(x, y + 0.28, glyph, ha="center", va="center",
+                fontsize=28, color=color, fontweight="bold", alpha=0.2, zorder=4)
+        ax.text(x, y + 0.28, glyph, ha="center", va="center",
+                fontsize=24, color=color, fontweight="bold", alpha=0.95, zorder=5)
+
+        tick_angle = lon_to_angle(lon)
+        tx1, ty1 = angle_xy(tick_angle, SIGN_R_INNER)
+        tx2, ty2 = angle_xy(tick_angle, SIGN_R_INNER - 0.15)
+        ax.plot([tx1, tx2], [ty1, ty2], color=color, linewidth=1.2, alpha=0.5)
 
         if data.get("retrograde", False):
-            ax.text(angle, r - 0.05, "Rx", ha="center", va="center",
-                    fontsize=7, color="#a87373", fontstyle="italic", alpha=0.8)
+            ax.text(x, y - 0.22, "Rx", ha="center", va="center",
+                    fontsize=9, color="#e09090", fontstyle="italic", alpha=0.85, zorder=5)
 
     aspects = calculate_aspects(planets)
     for p1_name, p2_name, aspect_type, orb in aspects:
         if p1_name in placed and p2_name in placed:
-            a1, _ = placed[p1_name]
-            a2, _ = placed[p2_name]
+            a1, r1, _ = placed[p1_name]
+            a2, r2, _ = placed[p2_name]
+            x1, y1 = angle_xy(a1, min(r1, INNER_R))
+            x2, y2 = angle_xy(a2, min(r2, INNER_R))
 
-            color = ASPECT_COLORS.get(aspect_type, BORDER_COLOR)
-            alpha = max(0.15, 0.5 - orb * 0.06)
-            linewidth = 1.2 if aspect_type in ("conjunction", "opposition") else 0.8
-            linestyle = "--" if aspect_type == "sextile" else "-"
+            color = ASPECT_COLORS.get(aspect_type, RING_STROKE)
+            alpha = max(0.2, 0.55 - orb * 0.06)
+            linewidth = 1.5 if aspect_type in ("conjunction", "opposition") else 1.0
+            linestyle = (0, (5, 5)) if aspect_type == "sextile" else "-"
 
-            n_points = 50
-            thetas = np.linspace(a1, a2, n_points)
-            rs = np.full(n_points, aspect_r)
-            mid = n_points // 2
-            for k in range(n_points):
-                dist_from_mid = abs(k - mid) / mid
-                rs[k] = aspect_r * (0.3 + 0.7 * dist_from_mid)
+            ax.plot([x1, x2], [y1, y2], color=color, linewidth=linewidth,
+                    alpha=alpha, linestyle=linestyle, zorder=2)
 
-            ax.plot(thetas, rs, color=color, linewidth=linewidth,
-                    alpha=alpha, linestyle=linestyle)
+    ax.text(0, -4.8, date, ha="center", va="center", fontsize=10,
+            color=SIGN_COLOR, fontfamily="monospace", alpha=0.5)
 
-    ax.text(0, -0.08, date, ha="center", va="center", fontsize=9,
-            color=LABEL_COLOR, transform=ax.transAxes,
-            fontfamily="monospace", alpha=0.6)
+    ax.text(0, 4.8, "D A I L Y   P L A N E T A R Y   O R A C L E",
+            ha="center", va="center", fontsize=7, color=SIGN_COLOR,
+            fontfamily="monospace", alpha=0.3)
 
-    plt.tight_layout(pad=0.5)
+    plt.tight_layout(pad=0)
 
     filename = f"starmap_{date}.png"
-    fig.savefig(filename, transparent=True, dpi=200,
-                bbox_inches="tight", pad_inches=0.3)
+    fig.savefig(filename, transparent=True, dpi=300,
+                bbox_inches="tight", pad_inches=0.2)
     plt.close(fig)
 
     return filename
