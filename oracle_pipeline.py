@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import urllib3
-from starmap import generate_starmap
+from orrery import generate_orrery
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -65,10 +65,7 @@ def upload_image(file_path):
     file_size = os.path.getsize(file_path)
 
     upload_url_endpoint = "https://www.wixapis.com/site-media/v1/files/generate-upload-url"
-    payload = {
-        "mimeType": "image/png",
-        "fileName": filename
-    }
+    payload = {"mimeType": "image/png", "fileName": filename}
 
     r1 = requests.post(upload_url_endpoint, headers=HEADERS, json=payload)
     if r1.status_code != 200:
@@ -81,7 +78,9 @@ def upload_image(file_path):
     with open(file_path, "rb") as f:
         file_data = f.read()
 
-    r2 = requests.put(upload_url, data=file_data, headers={"Content-Type": "image/png"})
+    r2 = requests.put(upload_url,
+                      data=file_data,
+                      headers={"Content-Type": "image/png"})
     if r2.status_code not in (200, 201, 204):
         print("Wix file upload error:", r2.text)
         r2.raise_for_status()
@@ -145,21 +144,28 @@ def get_item_id(slug):
 def update_oracle_image(item_id, image_url):
 
     get_url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}?dataCollectionId={COLLECTION_ID}"
+
     r = requests.get(get_url, headers=HEADERS)
-    if r.status_code != 200:
-        print("Wix fetch error:", r.text)
-        r.raise_for_status()
+    r.raise_for_status()
 
-    item = r.json()["dataItem"]
-    item["data"]["starMapImage"] = image_url
+    existing_item = r.json()["dataItem"]
 
-    put_url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}"
+    existing_data = existing_item.get("data", {})
+
+    # preserve everything already in the CMS record
+    existing_data["starMapImage"] = image_url
+
     payload = {
         "dataCollectionId": COLLECTION_ID,
-        "dataItem": item
+        "dataItem": {
+            "id": item_id,
+            "data": existing_data
+        }
     }
 
-    response = requests.put(put_url, headers=HEADERS, json=payload)
+    put_url = "https://www.wixapis.com/wix-data/v2/items/update"
+
+    response = requests.post(put_url, headers=HEADERS, json=payload)
 
     if response.status_code != 200:
         print("Wix update error:", response.text)
@@ -184,11 +190,11 @@ def run():
 
     planets = extract_planets(data)
 
-    print("Generating star map...")
+    print("Generating orrery...")
 
-    image_file = generate_starmap(planets, data["date"])
+    image_file = generate_orrery(planets, data["date"])
 
-    print("Uploading star map to Wix...")
+    print("Uploading orrery to Wix...")
 
     image_url = upload_image(image_file)
 
@@ -200,7 +206,7 @@ def run():
 
     update_oracle_image(item_id, image_url)
 
-    print("✔ Star map successfully attached to oracle entry")
+    print("✔ Orrery successfully attached to oracle entry")
 
 
 if __name__ == "__main__":
