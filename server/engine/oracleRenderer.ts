@@ -1,4 +1,9 @@
-import OpenAI from "openai";
+/**
+ * oracleRenderer.ts
+ * Fetches live planetary data and maps it to the exact InsertOracleEntry shape
+ * defined in shared/schema.ts — ready for storage.createOracleEntry()
+ */
+
 import {
   calculatePlanetPositions,
   calculateAspects,
@@ -9,205 +14,348 @@ import {
   getPlanetaryColorRegister,
   getDominantElement,
   generateSignals,
-  type PlanetPosition,
-  type AspectInfo,
-  type SignalResult,
 } from "./planetaryData";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+import type { InsertOracleEntry } from "@shared/schema";
 
-const SYSTEM_PROMPT = `You are a symbolic systems analyst for the Daily Planetary Oracle by Dark Folio.
-Astrology is treated as interpretive language, not causal force.
-Do not make deterministic, predictive, or fatalistic statements.
-Do not claim historical rarity unless explicitly provided verified statistical data.
-When analyzing events, avoid mythologizing violence or framing conflict as cosmically ordained.
-Use probabilistic and observational framing such as "suggests", "reflects", "coincides with", "tends to".
-Maintain an analytical tone with restrained poetic inflection — like a column in a serious publication written by someone the reader trusts.
-Never use: "fated", "destined", "inevitable", "once in a century", "portal", "rupture", "the old world ends".
-Never use emoji.
-Never use "be careful today" or generic advice language.
-Never start with greetings like "Welcome back" or "Today's energy is...".
-Go straight into observation. Assume the reader is intelligent.`;
+// ─────────────────────────────────────────────
+// Tarot card selection based on dominant aspect + element
+// ─────────────────────────────────────────────
 
-interface OracleGenerationResult {
-  atmosphericReading: string;
-  fullReading: string;
-  todaysTarot: string;
-  tarotReasoning: string;
-  todaysRune: string;
-  runeReasoning: string;
-  todaysGem: string;
-  gemReasoning: string;
-  closingLine: string;
-}
+const TAROT_BY_ASPECT: Record<string, { card: string; reasoning: string }> = {
+  conjunction: {
+    card: "The World",
+    reasoning:
+      "Conjunction signals unity and completion — the merging of two forces into one.",
+  },
+  opposition: {
+    card: "The Moon",
+    reasoning:
+      "Opposition reveals tension between polarities, mirroring The Moon's duality.",
+  },
+  trine: {
+    card: "The Star",
+    reasoning:
+      "Trine aspects flow harmoniously, reflecting The Star's ease and inspiration.",
+  },
+  square: {
+    card: "The Tower",
+    reasoning:
+      "Squares create friction and challenge, echoing The Tower's disruption.",
+  },
+  sextile: {
+    card: "The Lovers",
+    reasoning:
+      "Sextiles open opportunities through connection, resonating with The Lovers.",
+  },
+};
 
-export async function generateOracleContent(
-  dateStr: string,
-  planets: PlanetPosition[],
-  aspects: AspectInfo[],
-  moonPhase: string,
-  wavelengthNm: number,
-  spectralColor: string,
-  signals: SignalResult[],
-  dominantElement: string
-): Promise<OracleGenerationResult> {
-  const retrogrades = planets.filter(p => p.retrograde);
-  const primaryAspect = aspects.length > 0
-    ? `${aspects[0].planet1} ${aspects[0].type} ${aspects[0].planet2} (${aspects[0].orb.toFixed(1)}° orb)`
-    : "No tight aspects";
+const TAROT_BY_ELEMENT: Record<string, { card: string; reasoning: string }> = {
+  fire: {
+    card: "The Emperor",
+    reasoning:
+      "Fire's drive and authority align with The Emperor's structured will.",
+  },
+  water: {
+    card: "The High Priestess",
+    reasoning:
+      "Water's intuition and depth mirror The High Priestess's inner knowing.",
+  },
+  air: {
+    card: "The Magician",
+    reasoning:
+      "Air's intellect and communication resonate with The Magician's mental mastery.",
+  },
+  earth: {
+    card: "The Empress",
+    reasoning:
+      "Earth's fertility and grounding echo The Empress's nurturing abundance.",
+  },
+};
 
-  const signalsSummary = signals.map(s =>
-    `Signal: ${s.id} (weight ${s.weight}) — ${s.rationale.join(", ")}. Allowed phrasing: ${s.allowedPhrases.join(", ")}`
-  ).join("\n");
+// ─────────────────────────────────────────────
+// Rune selection based on dominant element + moon phase
+// ─────────────────────────────────────────────
 
-  const planetSummary = planets.map(p =>
-    `${p.name} in ${p.sign} (${p.degree}°)${p.retrograde ? " [R]" : ""}`
-  ).join(", ");
+const RUNE_BY_ELEMENT: Record<string, { rune: string; reasoning: string }> = {
+  fire: {
+    rune: "Sowilo",
+    reasoning: "Sowilo, the sun rune, channels fire's radiant, driving force.",
+  },
+  water: {
+    rune: "Laguz",
+    reasoning: "Laguz embodies water's flow, intuition, and emotional depth.",
+  },
+  air: {
+    rune: "Ansuz",
+    reasoning: "Ansuz governs communication and divine breath — air's domain.",
+  },
+  earth: {
+    rune: "Fehu",
+    reasoning:
+      "Fehu represents abundance and material grounding — earth's gift.",
+  },
+};
 
-  const aspectSummary = aspects.slice(0, 6).map(a =>
-    `${a.planet1} ${a.type} ${a.planet2} (orb ${a.orb.toFixed(1)}°)`
-  ).join(", ");
+// ─────────────────────────────────────────────
+// Gem selection based on wavelength range
+// ─────────────────────────────────────────────
 
-  const userPrompt = `Generate a Daily Planetary Oracle entry for ${dateStr}.
-
-ASTRONOMICAL DATA (use only these facts):
-Planets: ${planetSummary}
-Key Aspects: ${aspectSummary}
-Moon Phase: ${moonPhase}
-Retrogrades: ${retrogrades.map(r => r.name).join(", ") || "None"}
-Dominant Element: ${dominantElement}
-
-HARMONIC DATA:
-Wavelength: ${wavelengthNm} nm
-Spectral Color: ${spectralColor}
-
-INTERPRETIVE SIGNALS (from rule engine):
-${signalsSummary || "No strong signals today — the sky is relatively quiet."}
-
-Please produce a JSON response with these exact fields:
-{
-  "atmosphericReading": "Opening paragraph (3-5 sentences). Grounded, analytical, with light mythic inflection. Start directly with astronomical observation. This is the free teaser.",
-  "fullReading": "Full atmospheric reading (3-4 paragraphs). Structural clarity. Psychological containment. Mythic seasoning, not performance. Non-deterministic language. Connect the harmonic wavelength and color to the day's themes.",
-  "todaysTarot": "Name of today's tarot card (selected through planetary and color alignment)",
-  "tarotReasoning": "1-2 sentences explaining the selection through planetary configuration and spectral register.",
-  "todaysRune": "Name of today's rune",
-  "runeReasoning": "1-2 sentences connecting the rune to the day's configuration.",
-  "todaysGem": "Name of today's gemstone",
-  "gemReasoning": "1-2 sentences connecting the gem to the wavelength and planetary themes.",
-  "closingLine": "Symbols describe atmosphere. Living remains an art."
-}
-
-TONE: Column-publication hybrid. Serious recurring column written by a grounded, intelligent, steady presence. Not a blog, not a diary, not a mystic sermon. Direct, human phrasing with subtle psychological observation.`;
-
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.2",
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userPrompt }
-    ],
-    response_format: { type: "json_object" },
-    max_completion_tokens: 8192,
-  });
-
-  const content = response.choices[0]?.message?.content || "{}";
-  const parsed = JSON.parse(content);
-
+function getGemByWavelength(nm: number): { gem: string; reasoning: string } {
+  if (nm < 450)
+    return {
+      gem: "Amethyst",
+      reasoning:
+        "Amethyst resonates with violet frequencies — spiritual clarity and protection.",
+    };
+  if (nm < 495)
+    return {
+      gem: "Sapphire",
+      reasoning:
+        "Sapphire channels indigo and blue light — truth, loyalty, and deep perception.",
+    };
+  if (nm < 530)
+    return {
+      gem: "Emerald",
+      reasoning:
+        "Emerald holds the green spectrum — growth, heart-opening, and renewal.",
+    };
+  if (nm < 590)
+    return {
+      gem: "Citrine",
+      reasoning:
+        "Citrine carries yellow light — optimism, clarity, and solar warmth.",
+    };
+  if (nm < 625)
+    return {
+      gem: "Carnelian",
+      reasoning:
+        "Carnelian vibrates in the orange band — creativity, courage, and vitality.",
+    };
   return {
-    atmosphericReading: parsed.atmosphericReading || "",
-    fullReading: parsed.fullReading || "",
-    todaysTarot: parsed.todaysTarot || "",
-    tarotReasoning: parsed.tarotReasoning || "",
-    todaysRune: parsed.todaysRune || "",
-    runeReasoning: parsed.runeReasoning || "",
-    todaysGem: parsed.todaysGem || "",
-    gemReasoning: parsed.gemReasoning || "",
-    closingLine: parsed.closingLine || "Symbols describe atmosphere. Living remains an art.",
+    gem: "Aquamarine",
+    reasoning:
+      "Aquamarine spans the transitional spectrum — flow, calm, and emotional release.",
   };
 }
 
-export function scrubDeterministicLanguage(text: string): string {
-  const banned = [
-    /\bfated\b/gi,
-    /\bdestined\b/gi,
-    /\binevitable\b/gi,
-    /\bwill happen\b/gi,
-    /\bcannot be undone\b/gi,
-    /\bonce in a century\b/gi,
-    /\bportal\b/gi,
-    /\brupture\b/gi,
-    /\bthe old world\b/gi,
-    /\bdividing line in history\b/gi,
-    /\bfour horsemen\b/gi,
-    /\bcosmic destiny\b/gi,
-    /\bcosmically ordained\b/gi,
-  ];
+// ─────────────────────────────────────────────
+// Atmospheric reading builder
+// ─────────────────────────────────────────────
 
-  let result = text;
-  banned.forEach(pattern => {
-    result = result.replace(pattern, "");
-  });
+function buildAtmosphericReading(
+  moonPhase: string,
+  dominantElement: string,
+  retrogrades: any[],
+  aspects: any[],
+): string {
+  const lines: string[] = [];
 
-  result = result.replace(/\s{2,}/g, " ").trim();
-  return result;
+  lines.push(moonPhase);
+
+  if (retrogrades.length > 0) {
+    const names = retrogrades.map((r: any) => r.name).join(", ");
+    lines.push(
+      `${names} ${retrogrades.length === 1 ? "moves" : "move"} in retrograde — review, reconsider, return.`,
+    );
+  } else {
+    lines.push("No planets in retrograde. Forward motion is unobstructed.");
+  }
+
+  const elementDescriptions: Record<string, string> = {
+    fire: "The dominant register is fire — initiation, will, and forward drive color the atmosphere.",
+    water:
+      "The dominant register is water — emotion, intuition, and the interior life hold sway.",
+    air: "The dominant register is air — thought, exchange, and connection define the current.",
+    earth:
+      "The dominant register is earth — grounding, patience, and material attention are favored.",
+  };
+  lines.push(
+    elementDescriptions[dominantElement] ||
+      `The dominant element is ${dominantElement}.`,
+  );
+
+  if (aspects.length > 0) {
+    const top = aspects[0];
+    lines.push(
+      `Primary configuration: ${top.planet1} ${top.type} ${top.planet2} — ${describeAspect(top.type)}.`,
+    );
+  }
+
+  return lines.join("\n");
 }
 
-export async function generateFullOracle(dateStr: string) {
-  const planets = calculatePlanetPositions(dateStr);
+function describeAspect(type: string): string {
+  const descriptions: Record<string, string> = {
+    conjunction: "forces merge, intensifying the energies involved",
+    opposition: "tension between polarities demands integration",
+    trine: "harmonious flow enables natural expression",
+    square: "friction creates pressure toward growth",
+    sextile: "opportunity arises through cooperative effort",
+  };
+  return (
+    descriptions[type.toLowerCase()] || "a notable celestial configuration"
+  );
+}
+
+// ─────────────────────────────────────────────
+// Full reading builder
+// ─────────────────────────────────────────────
+
+function buildFullReading(
+  planets: any[],
+  aspects: any[],
+  dominantElement: string,
+  wavelengthNm: number,
+  spectralColor: string,
+): string {
+  const sections: string[] = [];
+
+  // Planetary positions narrative
+  const planetLines = planets
+    .slice(0, 7)
+    .map(
+      (p: any) =>
+        `${p.name} in ${p.sign}${p.retrograde ? " (Rx)" : ""} at ${p.degree}°`,
+    )
+    .join(", ");
+  sections.push(`Active bodies: ${planetLines}.`);
+
+  // Aspect narrative
+  if (aspects.length > 0) {
+    const aspectLines = aspects
+      .slice(0, 3)
+      .map(
+        (a: any) =>
+          `${a.planet1} ${a.type} ${a.planet2} (${a.orb.toFixed(1)}°)`,
+      )
+      .join("; ");
+    sections.push(`Key configurations: ${aspectLines}.`);
+  }
+
+  // Elemental + spectral synthesis
+  sections.push(
+    `The elemental register is ${dominantElement}. ` +
+      `The harmonic field translates to ${wavelengthNm}nm — ${spectralColor} — in the visible spectrum.`,
+  );
+
+  return sections.join("\n\n");
+}
+
+// ─────────────────────────────────────────────
+// Closing line (keeper paragraph)
+// ─────────────────────────────────────────────
+
+function buildClosingLine(
+  date: string,
+  dominantElement: string,
+  wavelengthNm: number,
+): string {
+  return (
+    `🜁 Archive Entry — ${date}. ` +
+    `A ${dominantElement}-weighted field. ` +
+    `The harmonic register settles near ${wavelengthNm}nm. ` +
+    `Symbols describe atmosphere. Living remains an art.`
+  );
+}
+
+// ─────────────────────────────────────────────
+// Main export — generateFullOracle()
+// ─────────────────────────────────────────────
+
+export async function generateFullOracle(
+  date: string,
+): Promise<InsertOracleEntry> {
+  // ── 1. Raw calculations ──────────────────────────────────────────────────
+  const planets = calculatePlanetPositions(date);
   const aspects = calculateAspects(planets);
-  const moonPhase = calculateMoonPhase(dateStr);
+  const moonPhase = calculateMoonPhase(date);
   const wavelengthNm = calculateWavelength(planets, aspects);
   const spectralColor = wavelengthToColorName(wavelengthNm);
-  const tarotColorRegister = getTarotColorRegister(wavelengthNm);
-  const planetaryColorRegister = getPlanetaryColorRegister(planets, aspects);
+  const tarotColorReg = getTarotColorRegister(wavelengthNm);
+  const planetaryColorReg = getPlanetaryColorRegister(planets, aspects);
   const dominantElement = getDominantElement(planets);
   const signals = generateSignals(planets, aspects);
 
-  const primaryAspect = aspects.length > 0
-    ? `${aspects[0].planet1} ${aspects[0].type} ${aspects[0].planet2} (${aspects[0].orb.toFixed(1)}°)`
-    : "No tight aspects";
+  // ── 2. Derived values ────────────────────────────────────────────────────
+  const retrogrades = planets.filter((p: any) => p.retrograde);
 
-  const retrogrades = planets.filter(p => p.retrograde);
-  const retrogradeStatus = retrogrades.length > 0
-    ? retrogrades.map(r => `${r.name} Rx in ${r.sign}`).join(", ")
-    : "No retrogrades";
+  const retrogradeStatus =
+    retrogrades.length > 0
+      ? retrogrades.map((r: any) => `${r.name} Rx in ${r.sign}`).join(", ")
+      : "No retrogrades";
 
-  const content = await generateOracleContent(
-    dateStr, planets, aspects, moonPhase, wavelengthNm,
-    spectralColor, signals, dominantElement
+  const primaryAspect =
+    aspects.length > 0
+      ? `${aspects[0].planet1} ${aspects[0].type} ${aspects[0].planet2} (${aspects[0].orb.toFixed(1)}°)`
+      : "No tight aspects";
+
+  // ── 3. Correspondences ───────────────────────────────────────────────────
+  const aspectType = aspects.length > 0 ? aspects[0].type.toLowerCase() : "";
+  const tarotData = TAROT_BY_ASPECT[aspectType] ||
+    TAROT_BY_ELEMENT[dominantElement] || {
+      card: "The Hermit",
+      reasoning: "A day of inward inquiry.",
+    };
+  const runeData = RUNE_BY_ELEMENT[dominantElement] || {
+    rune: "Isa",
+    reasoning: "A moment of stillness and pause.",
+  };
+  const gemData = getGemByWavelength(wavelengthNm);
+
+  // ── 4. Prose fields ──────────────────────────────────────────────────────
+  const atmosphericReading = buildAtmosphericReading(
+    moonPhase,
+    dominantElement,
+    retrogrades,
+    aspects,
   );
+  const fullReading = buildFullReading(
+    planets,
+    aspects,
+    dominantElement,
+    wavelengthNm,
+    spectralColor,
+  );
+  const closingLine = buildClosingLine(date, dominantElement, wavelengthNm);
 
-  const archiveTags = [
-    dominantElement + "-dominant",
-    moonPhase.toLowerCase().replace(/\s/g, "-"),
-    ...retrogrades.map(r => r.name.toLowerCase() + "-retrograde"),
-    ...aspects.slice(0, 3).map(a => `${a.planet1.toLowerCase()}-${a.type}-${a.planet2.toLowerCase()}`),
-  ].join(",");
+  // ── 5. Archive tags ──────────────────────────────────────────────────────
+  const tags: string[] = [];
+  if (dominantElement)
+    tags.push(
+      `${dominantElement.charAt(0).toUpperCase() + dominantElement.slice(1)}-Dominant Days`,
+    );
+  if (retrogrades.length > 0) tags.push("Retrograde Active");
+  if (retrogrades.length === 0) tags.push("Direct Motion");
+  if (aspectType === "conjunction") tags.push("Conjunction Day");
+  if (aspectType === "opposition") tags.push("Opposition Day");
 
-  return {
-    date: dateStr,
+  // ── 6. Assemble InsertOracleEntry ────────────────────────────────────────
+  const entry: InsertOracleEntry = {
+    date,
     moonPhase,
     primaryAspect,
     retrogradeStatus,
     wavelengthNm,
     spectralColor,
-    tarotColorRegister,
-    planetaryColorRegister,
-    atmosphericReading: scrubDeterministicLanguage(content.atmosphericReading),
-    fullReading: scrubDeterministicLanguage(content.fullReading),
-    todaysTarot: content.todaysTarot,
-    tarotReasoning: content.tarotReasoning,
-    todaysRune: content.todaysRune,
-    runeReasoning: content.runeReasoning,
-    todaysGem: content.todaysGem,
-    gemReasoning: content.gemReasoning,
-    closingLine: content.closingLine,
+    tarotColorRegister: tarotColorReg,
+    planetaryColorRegister: planetaryColorReg,
+    atmosphericReading,
+    fullReading,
+    todaysTarot: tarotData.card,
+    tarotReasoning: tarotData.reasoning,
+    todaysRune: runeData.rune,
+    runeReasoning: runeData.reasoning,
+    todaysGem: gemData.gem,
+    gemReasoning: gemData.reasoning,
+    closingLine,
     planetPositionsJson: JSON.stringify(planets),
     keyAspectsJson: JSON.stringify(aspects.slice(0, 8)),
     signalsJson: JSON.stringify(signals),
-    archiveTags,
+    archiveTags: tags.join(", "),
     dominantElement,
   };
+
+  return entry;
 }
+
