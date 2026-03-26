@@ -2,175 +2,279 @@ import os
 import json
 import requests
 import urllib3
-from orrery import generate_orrery
+from datetime import datetime
 
+# Suppress SSL warnings (Replit internal calls)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ------------------------------------------------
+# Config — all sensitive values from Replit Secrets
+# ------------------------------------------------
 
 WIX_API_KEY = os.getenv("WIX_API_KEY")
 WIX_SITE_ID = os.getenv("WIX_SITE_ID")
-ORACLE_API_URL = os.getenv("ORACLE_API_URL")
+ORACLE_API_URL = os.getenv(
+    "ORACLE_API_URL", "https://cosmic-vibes.replit.app/api/wix/horoscope/daily-forecast"
+)
 
 COLLECTION_ID = "DailyOracle1"
 
 HEADERS = {
     "Authorization": WIX_API_KEY,
     "wix-site-id": WIX_SITE_ID,
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
 }
 
 # ------------------------------------------------
-# Fetch Oracle JSON from your API
+# Step 1 — Fetch oracle data from your API
 # ------------------------------------------------
 
 
 def fetch_oracle():
-
-    response = requests.get(ORACLE_API_URL, verify=False)
-
+    print(f"  GET {ORACLE_API_URL}")
+    response = requests.get(ORACLE_API_URL, verify=False, timeout=30)
     response.raise_for_status()
-
-    return response.json()
+    data = response.json()
+    if not data.get("success"):
+        raise Exception(f"Oracle API returned success=false: {data}")
+    return data
 
 
 # ------------------------------------------------
-# Extract planet data for starmap generator
+# Step 2 — Map API JSON → Wix CMS fields
+# ------------------------------------------------
+
+
+def build_cms_payload(data):
+    """
+    Maps every field from the daily-forecast API response
+    to the exact field names in your DailyOracle1 collection.
+    """
+    date_str = data["date"]  # "2026-03-26"
+    slug = f"oracle-{date_str}"  # "oracle-2026-03-26"
+    forecast = data.get("forecast", {})
+    planets = data.get("planetPositions", [])
+    retrogrades = [p for p in planets if p.get("retrograde")]
+
+    # --- Key aspects as a clean string ---
+    key_aspects = forecast.get("keyAspects", [])
+    aspect_summary = " · ".join(key_aspects) if key_aspects else ""
+
+    # --- Title ---
+    title = f"Daily Oracle — {date_str}"
+
+    # --- Excerpt: short single sentence ---
+    excerpt = forecast.get("overallTheme", "")
+
+    # --- Main content block (full reading) ---
+    content = "\n\n".join(
+        filter(
+            None,
+            [
+                forecast.get("overallInterpretation", ""),
+                forecast.get("deepInterpretation", ""),
+                f"Daily Mantra: {forecast.get('dailyMantra', '')}",
+                f"Cosmic Note: {forecast.get('cosmicNote', '')}",
+                f"Lucky Window: {forecast.get('luckyWindow', '')}",
+                f"Avoid Window: {forecast.get('avoidWindow', '')}",
+            ],
+        )
+    )
+
+    # --- Archive tags ---
+    archive_tags = data.get("archiveTags", forecast.get("archiveTags", []))
+
+    # --- Harmonic source text ---
+    harmonic_source = data.get("harmonicSource") or forecast.get("harmonicSource", "")
+
+    # --- Build the payload ---
+    payload = {
+        # Identity
+        "title": title,
+        "date": date_str,
+        "slug": slug,
+        "excerpt": excerpt,
+        # Rich text / prose
+        "content": content,
+        "keeperParagraph": (
+            data.get("keeperParagraph") or forecast.get("keeperParagraph", "")
+        ),
+        "richharmonicSource": harmonic_source,
+        # Frequency / colour
+        "wavelengthNm": data.get("wavelengthNm"),
+        "sourcejson": json.dumps(
+            {
+                "harmonicSource": harmonic_source,
+                "wavelengthNm": data.get("wavelengthNm"),
+                "source": data.get("source"),
+            }
+        ),
+        # Planetary JSON blobs
+        "planetPositionsJSON": json.dumps(planets),
+        "keyAspectsJSON": json.dumps(key_aspects),
+        "retrogradesJSON": json.dumps(retrogrades),
+        # Calculated summaries
+        "aspectSummary": aspect_summary,
+        "retrogradeCount": len(retrogrades),
+        "dominantElement": forecast.get("dominantElement", ""),
+        "classification": forecast.get("elementalMood", ""),
+        # Archive
+        "archiveTags": archive_tags,
+        # Oracle correspondences
+        "tarotCard": forecast.get("todaysTarotCard", ""),
+        "rune": forecast.get("todaysRune", ""),
+        "gemOfTheDay": forecast.get("todaysGem", ""),
+        "moonPhase": forecast.get("moonPhaseDescription", ""),
+        # starMapImage is handled separately by the orrery uploader
+    }
+
+    return slug, payload
+
+
+# ------------------------------------------------
+# Step 3 — Check if record exists for today's slug
+# ------------------------------------------------
+
+
+def find_existing_item(slug):
+    """
+    Returns the item id if a record with this slug already exists,
+    or None if it doesn't.
+    """
+    url = "https://www.wixapis.com/wix-data/v2/items/query"
+    payload = {
+        "dataCollectionId": COLLECTION_ID,
+        "query": {
+            "filter": {"$and": [{"slug": {"$eq": slug}}]},
+            "paging": {"limit": 1},
+        },
+    }
+
+    r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
+    if r.status_code != 200:
+        print(f"  Query error {r.status_code}: {r.text}")
+        r.raise_for_status()
+
+    items = r.json().get("dataItems", [])
+    if items:
+        item_id = items[0]["id"]
+        print(f"  Found existing record: {item_id}")
+        return item_id
+    return None
+
+
+# ------------------------------------------------
+# Step 4a — INSERT a new CMS record
+# ------------------------------------------------
+
+
+def insert_item(data_payload):
+    url = "https://www.wixapis.com/wix-data/v2/items"
+    body = {"dataCollectionId": COLLECTION_ID, "dataItem": {"data": data_payload}}
+
+    r = requests.post(url, headers=HEADERS, json=body, timeout=30)
+    if r.status_code not in (200, 201):
+        print(f"  Insert error {r.status_code}: {r.text}")
+        r.raise_for_status()
+
+    item_id = r.json()["dataItem"]["id"]
+    print(f"  ✔ Inserted new record: {item_id}")
+    return item_id
+
+
+# ------------------------------------------------
+# Step 4b — UPDATE an existing CMS record
+# ------------------------------------------------
+
+
+def update_item(item_id, data_payload):
+    url = "https://www.wixapis.com/wix-data/v2/items/update"
+    body = {
+        "dataCollectionId": COLLECTION_ID,
+        "dataItem": {"id": item_id, "data": data_payload},
+    }
+
+    r = requests.post(url, headers=HEADERS, json=body, timeout=30)
+    if r.status_code != 200:
+        print(f"  Update error {r.status_code}: {r.text}")
+        r.raise_for_status()
+
+    print(f"  ✔ Updated record: {item_id}")
+    return item_id
+
+
+# ------------------------------------------------
+# Step 5 — Generate + upload orrery image
 # ------------------------------------------------
 
 
 def extract_planets(data):
-
     planets = {}
-
-    for p in data["planetPositions"]:
-
+    for p in data.get("planetPositions", []):
         name = p["name"].lower()
-
         planets[name] = {
             "sign": p["sign"],
             "degree": p["degree"],
-            "retrograde": p["retrograde"]
+            "retrograde": p["retrograde"],
         }
-
     return planets
 
 
-# ------------------------------------------------
-# Upload generated PNG to Wix Media
-# ------------------------------------------------
-
-
 def upload_image(file_path):
-
     filename = os.path.basename(file_path)
-    file_size = os.path.getsize(file_path)
 
-    upload_url_endpoint = "https://www.wixapis.com/site-media/v1/files/generate-upload-url"
-    payload = {"mimeType": "image/png", "fileName": filename}
-
-    r1 = requests.post(upload_url_endpoint, headers=HEADERS, json=payload)
+    # 1. Get a pre-signed upload URL from Wix
+    r1 = requests.post(
+        "https://www.wixapis.com/site-media/v1/files/generate-upload-url",
+        headers=HEADERS,
+        json={"mimeType": "image/png", "fileName": filename},
+        timeout=30,
+    )
     if r1.status_code != 200:
-        print("Wix upload URL error:", r1.text)
+        print(f"  Upload URL error {r1.status_code}: {r1.text}")
         r1.raise_for_status()
 
-    result = r1.json()
-    upload_url = result["uploadUrl"]
+    upload_url = r1.json()["uploadUrl"]
 
+    # 2. PUT the file bytes
     with open(file_path, "rb") as f:
         file_data = f.read()
 
-    r2 = requests.put(upload_url,
-                      data=file_data,
-                      headers={"Content-Type": "image/png"})
+    r2 = requests.put(
+        upload_url, data=file_data, headers={"Content-Type": "image/png"}, timeout=60
+    )
     if r2.status_code not in (200, 201, 204):
-        print("Wix file upload error:", r2.text)
+        print(f"  File upload error {r2.status_code}: {r2.text}")
         r2.raise_for_status()
 
-    upload_result = r2.json()
-    file_info = upload_result.get("file", {})
+    file_info = r2.json().get("file", {})
     file_id = file_info.get("id", "")
-    file_display_name = file_info.get("displayName", filename)
+    file_name = file_info.get("displayName", filename)
 
     if not file_id:
-        print("Upload response:", json.dumps(upload_result, indent=2))
-        raise Exception("No file ID returned from Wix upload")
+        raise Exception(f"No file ID in Wix upload response: {r2.json()}")
 
-    wix_image_url = f"wix:image://v1/{file_id}/{file_display_name}#originWidth=1200&originHeight=300"
-
-    print(f"  Uploaded to Wix Media: {wix_image_url}")
-
-    return wix_image_url
+    wix_url = f"wix:image://v1/{file_id}/{file_name}#originWidth=1200&originHeight=300"
+    print(f"  Uploaded orrery: {wix_url}")
+    return wix_url
 
 
-# ------------------------------------------------
-# Find CMS item using slug
-# ------------------------------------------------
-
-
-def get_item_id(slug):
-
-    url = "https://www.wixapis.com/wix-data/v2/items/query"
-
-    payload = {
-        "dataCollectionId": COLLECTION_ID,
-        "query": {
-            "filter": {
-                "slug": slug
-            },
-            "limit": 1
-        }
-    }
-
-    response = requests.post(url, headers=HEADERS, json=payload)
-
-    if response.status_code != 200:
-        print("Wix error response:", response.text)
-        response.raise_for_status()
-
-    data = response.json()
-
-    items = data.get("dataItems", [])
-
-    if not items:
-        raise Exception(f"No CMS item found for slug: {slug}")
-
-    return items[0]["id"]
-
-
-# ------------------------------------------------
-# Update starMapImage field
-# ------------------------------------------------
-
-
-def update_oracle_image(item_id, image_url):
-
-    get_url = f"https://www.wixapis.com/wix-data/v2/items/{item_id}?dataCollectionId={COLLECTION_ID}"
-
-    r = requests.get(get_url, headers=HEADERS)
+def patch_star_map(item_id, image_url):
+    """Fetch current record and patch only the starMapImage field."""
+    # GET current data
+    get_url = (
+        f"https://www.wixapis.com/wix-data/v2/items/{item_id}"
+        f"?dataCollectionId={COLLECTION_ID}"
+    )
+    r = requests.get(get_url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
-    existing_item = r.json()["dataItem"]
-
-    existing_data = existing_item.get("data", {})
-
-    # preserve everything already in the CMS record
+    existing_data = r.json()["dataItem"].get("data", {})
     existing_data["starMapImage"] = image_url
 
-    payload = {
-        "dataCollectionId": COLLECTION_ID,
-        "dataItem": {
-            "id": item_id,
-            "data": existing_data
-        }
-    }
-
-    put_url = "https://www.wixapis.com/wix-data/v2/items/update"
-
-    response = requests.post(put_url, headers=HEADERS, json=payload)
-
-    if response.status_code != 200:
-        print("Wix update error:", response.text)
-
-    response.raise_for_status()
+    # UPDATE with patched data
+    update_item(item_id, existing_data)
+    print(f"  ✔ starMapImage attached")
 
 
 # ------------------------------------------------
@@ -179,34 +283,63 @@ def update_oracle_image(item_id, image_url):
 
 
 def run():
+    print("\n╔══════════════════════════════════════╗")
+    print("║     COSMIC VIBES — Daily Pipeline    ║")
+    print("╚══════════════════════════════════════╝\n")
 
-    print("Fetching oracle data...")
-
+    # 1. Fetch
+    print("▶ Step 1: Fetching oracle data...")
     data = fetch_oracle()
+    print(f"  Date: {data['date']} | Source: {data.get('source')}")
 
-    slug = f"oracle-{data['date']}"
+    # 2. Map fields
+    print("\n▶ Step 2: Building CMS payload...")
+    slug, cms_payload = build_cms_payload(data)
+    print(f"  Slug: {slug}")
+    print(
+        f"  Tarot: {cms_payload['tarotCard']} | "
+        f"Rune: {cms_payload['rune']} | "
+        f"Gem: {cms_payload['gemOfTheDay']}"
+    )
+    print(f"  Moon: {cms_payload['moonPhase']}")
+    print(
+        f"  Element: {cms_payload['dominantElement']} | "
+        f"Retrogrades: {cms_payload['retrogradeCount']}"
+    )
 
-    print("Extracting planet positions...")
+    # 3. Insert or Update
+    print("\n▶ Step 3: Checking for existing CMS record...")
+    item_id = find_existing_item(slug)
 
-    planets = extract_planets(data)
+    if item_id:
+        print("\n▶ Step 4: Updating existing record...")
+        update_item(item_id, cms_payload)
+    else:
+        print("\n▶ Step 4: Inserting new record...")
+        item_id = insert_item(cms_payload)
 
-    print("Generating orrery...")
+    # 5. Orrery image
+    print("\n▶ Step 5: Generating orrery star map...")
+    try:
+        from orrery import generate_orrery
 
-    image_file = generate_orrery(planets, data["date"])
+        planets = extract_planets(data)
+        image_file = generate_orrery(planets, data["date"])
+        print("\n▶ Step 6: Uploading orrery to Wix Media...")
+        image_url = upload_image(image_file)
+        print("\n▶ Step 7: Attaching image to CMS record...")
+        patch_star_map(item_id, image_url)
+    except ImportError:
+        print(
+            "  ⚠ orrery module not found — skipping star map (safe to ignore if testing)"
+        )
+    except Exception as e:
+        print(f"  ⚠ Orrery step failed (record still saved): {e}")
 
-    print("Uploading orrery to Wix...")
-
-    image_url = upload_image(image_file)
-
-    print("Finding CMS record...")
-
-    item_id = get_item_id(slug)
-
-    print("Updating CMS item...")
-
-    update_oracle_image(item_id, image_url)
-
-    print("✔ Orrery successfully attached to oracle entry")
+    print("\n✨ Pipeline complete!")
+    print(f"   Record slug: {slug}")
+    print(f"   Wix item ID: {item_id}\n")
+    return item_id
 
 
 if __name__ == "__main__":
