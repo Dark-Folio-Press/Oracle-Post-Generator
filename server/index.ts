@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import cron from "node-cron";
 
 const app = express();
 const httpServer = createServer(app);
@@ -98,6 +99,30 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+
+      cron.schedule("0 0 * * *", async () => {
+        const today = new Date().toISOString().split("T")[0];
+        log(`[cron] Midnight UTC — generating oracle for ${today}`);
+        try {
+          const res = await fetch(`http://localhost:${port}/api/oracle/generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date: today }),
+          });
+          const data = await res.json() as any;
+          if (res.status === 409) {
+            log(`[cron] Oracle already exists for ${today}`);
+          } else if (res.ok) {
+            log(`[cron] Oracle generated: ${data.todaysTarot} / ${data.todaysRune} / ${data.todaysGem}`);
+          } else {
+            log(`[cron] Generation failed: ${data.error || res.status}`);
+          }
+        } catch (err) {
+          log(`[cron] Oracle generation error: ${err}`);
+        }
+      }, { timezone: "UTC" });
+
+      log("Midnight UTC cron scheduler active");
     },
   );
 })();
