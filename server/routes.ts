@@ -134,6 +134,50 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * Wix-friendly daily forecast endpoint.
+   * Returns today's oracle entry (tarot / rune / gem + readings) for
+   * Toronto, Ontario (America/Toronto timezone). If no entry exists yet
+   * for today it is generated on-demand and persisted before returning.
+   */
+  app.get("/api/wix/horoscope/daily-forecast", async (_req, res) => {
+    try {
+      // Compute today's date in America/Toronto as YYYY-MM-DD
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const p = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+      const today = `${p.year}-${p.month}-${p.day}`;
+
+      let entry = await storage.getOracleByDate(today);
+
+      // If today's oracle doesn't exist yet, generate and persist it
+      if (!entry) {
+        const oracleData = await generateFullOracle(today);
+        entry = await storage.createOracleEntry(oracleData);
+      }
+
+      return res.json({
+        date: entry.date,
+        todaysTarot: entry.todaysTarot,
+        tarotReasoning: entry.tarotReasoning,
+        todaysRune: entry.todaysRune,
+        runeReasoning: entry.runeReasoning,
+        todaysGem: entry.todaysGem,
+        gemReasoning: entry.gemReasoning,
+        atmosphericReading: entry.atmosphericReading,
+        fullReading: entry.fullReading,
+        closingLine: entry.closingLine,
+      });
+    } catch (error) {
+      console.error("Error in /api/wix/horoscope/daily-forecast:", error);
+      return res.status(500).json({ error: "Failed to load daily forecast" });
+    }
+  });
+
   return httpServer;
 }
 
