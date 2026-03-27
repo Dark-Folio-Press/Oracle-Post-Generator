@@ -120,8 +120,7 @@ export async function registerRoutes(
       const format = req.query.format || "json";
 
       if (format === "html") {
-        const planets = entry.planetPositionsJson ? JSON.parse(entry.planetPositionsJson) : [];
-        const html = generateWixEmbed(entry, planets);
+        const html = generateWixEmbed(entry);
         res.setHeader("Content-Type", "text/html");
         res.send(html);
       } else {
@@ -185,7 +184,30 @@ export async function registerRoutes(
   return httpServer;
 }
 
-function generateWixEmbed(entry: any, planets: any[]): string {
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeCssColor(value: string | null | undefined, fallback: string): string {
+  const input = value || fallback;
+  // Only allow hex colors (#rrggbb / #rgb) or simple named colors (letters, hyphens, spaces)
+  if (/^#[0-9a-fA-F]{3,8}$/.test(input) || /^[a-zA-Z][a-zA-Z -]*$/.test(input)) {
+    return input;
+  }
+  return fallback;
+}
+
+function formatWavelength(value: unknown): string {
+  return typeof value === "number" ? String(value) : "N/A";
+}
+
+function generateWixEmbed(entry: any): string {
+  const gradientColor = safeCssColor(entry.spectralColor, "#e7d9a6");
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -211,23 +233,23 @@ function generateWixEmbed(entry: any, planets: any[]): string {
 </head>
 <body>
   <div class="header">
-    <div class="date">${entry.date}</div>
+    <div class="date">${escapeHtml(entry.date || "")}</div>
     <div class="meta">
-      ${entry.moonPhase}<br>
-      ${entry.primaryAspect}<br>
-      ${entry.retrogradeStatus || ""}
+      ${escapeHtml(entry.moonPhase || "")}<br>
+      ${escapeHtml(entry.primaryAspect || "")}<br>
+      ${escapeHtml(entry.retrogradeStatus || "")}
     </div>
   </div>
-  <div class="gradient-strip" style="background: linear-gradient(to right, ${entry.spectralColor || "#e7d9a6"}, #8a8578, #4a4540);"></div>
-  <div class="wavelength-label">${entry.wavelengthNm} nm</div>
-  <div class="reading">${(entry.atmosphericReading || "").split("\n").map((p: string) => `<p>${p}</p>`).join("")}</div>
-  ${entry.fullReading ? `<div class="reading">${entry.fullReading.split("\n").map((p: string) => `<p>${p}</p>`).join("")}</div>` : ""}
+  <div class="gradient-strip" style="background: linear-gradient(to right, ${gradientColor}, #8a8578, #4a4540);"></div>
+  <div class="wavelength-label">${escapeHtml(formatWavelength(entry.wavelengthNm))} nm</div>
+  <div class="reading">${(entry.atmosphericReading || "").split("\n").map((p: string) => `<p>${escapeHtml(p)}</p>`).join("")}</div>
+  ${entry.fullReading ? `<div class="reading">${entry.fullReading.split("\n").map((p: string) => `<p>${escapeHtml(p)}</p>`).join("")}</div>` : ""}
   <div class="correspondences">
-    ${entry.todaysTarot ? `<div class="correspondence"><div class="correspondence-title">Today's Tarot</div><div class="correspondence-value">${entry.todaysTarot}</div><div class="correspondence-reason">${entry.tarotReasoning || ""}</div></div>` : ""}
-    ${entry.todaysRune ? `<div class="correspondence"><div class="correspondence-title">Today's Rune</div><div class="correspondence-value">${entry.todaysRune}</div><div class="correspondence-reason">${entry.runeReasoning || ""}</div></div>` : ""}
-    ${entry.todaysGem ? `<div class="correspondence"><div class="correspondence-title">Today's Gem</div><div class="correspondence-value">${entry.todaysGem}</div><div class="correspondence-reason">${entry.gemReasoning || ""}</div></div>` : ""}
+    ${entry.todaysTarot ? `<div class="correspondence"><div class="correspondence-title">Today&#39;s Tarot</div><div class="correspondence-value">${escapeHtml(entry.todaysTarot)}</div><div class="correspondence-reason">${escapeHtml(entry.tarotReasoning || "")}</div></div>` : ""}
+    ${entry.todaysRune ? `<div class="correspondence"><div class="correspondence-title">Today&#39;s Rune</div><div class="correspondence-value">${escapeHtml(entry.todaysRune)}</div><div class="correspondence-reason">${escapeHtml(entry.runeReasoning || "")}</div></div>` : ""}
+    ${entry.todaysGem ? `<div class="correspondence"><div class="correspondence-title">Today&#39;s Gem</div><div class="correspondence-value">${escapeHtml(entry.todaysGem)}</div><div class="correspondence-reason">${escapeHtml(entry.gemReasoning || "")}</div></div>` : ""}
   </div>
-  <div class="closing">${entry.closingLine || "Symbols describe atmosphere. Living remains an art."}</div>
+  <div class="closing">${escapeHtml(entry.closingLine || "Symbols describe atmosphere. Living remains an art.")}</div>
   <div class="signature">— Dark Folio<br>Keeper of the Archive</div>
 </body>
 </html>`;
