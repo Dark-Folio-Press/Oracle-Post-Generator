@@ -20,6 +20,10 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", build: "2026-03-27-v2", timestamp: Date.now() });
+  });
+
   app.get("/api/oracle", async (req, res) => {
     try {
       const entries = await storage.getAllOracleEntries();
