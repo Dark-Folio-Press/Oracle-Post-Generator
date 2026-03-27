@@ -12,7 +12,7 @@ export function serveStatic(app: Express) {
 
   app.use(express.static(distPath));
 
-  app.use("/{*path}", (req, res, next) => {
+  app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) {
       return next();
     }
